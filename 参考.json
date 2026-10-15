@@ -1,4 +1,3 @@
-(greetings.json)
 {
   "keywords": [
     "こんにちは",
@@ -12,7 +11,7 @@
   ]
 }
 
-(questions.json)
+
 {
   "keywords": [
     "何ができる？",
