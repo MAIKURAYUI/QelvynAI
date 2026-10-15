@@ -1,0 +1,33 @@
+
+{
+  "rules": [
+    {
+      "intent": "greeting",
+      "keywords": [
+        "こんにちは",
+        "こんにちわ",
+        "こんちは",
+        "やあ"
+      ],
+      "response": "こんにちは！今日は何をしますか？"
+    },
+    {
+      "intent": "thanks",
+      "keywords": [
+        "ありがとう",
+        "ありがと",
+        "どうも"
+      ],
+      "response": "どういたしまして！"
+    },
+    {
+      "intent": "wellbeing",
+      "keywords": [
+        "元気？",
+        "調子どう？"
+      ],
+      "response": "元気だよ！あなたはどう？"
+    }
+  ],
+  "fallback": "ごめんね、もう少し詳しく教えてくれる？"
+}
