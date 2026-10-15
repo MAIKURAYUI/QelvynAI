@@ -1,22 +1,39 @@
 
-<div class="app">
-  <h1>Mini Voice AI</h1>
-  <p class="subtitle">軽量な音声対話AI</p>
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Mini Voice AI</title>
+  <meta name="description" content="軽量な音声対話AI">
+  <link rel="stylesheet" href="./style.css">
+  <script src="./main.js" defer></script>
+</head>
+<body>
+  <main class="app">
+    <h1>Mini Voice AI</h1>
+    <p class="subtitle">軽量な音声対話AI</p>
 
-  <div id="status">準備完了</div>
+    <section class="chat" aria-live="polite">
+      <p id="status">準備中...</p>
+      <div id="messages"></div>
+    </section>
 
-  <div id="chat" class="chat">
-    <div class="message bot">
-      こんにちは！何を話そうか？
+    <div class="controls">
+      <button id="micButton" type="button">🎤 話しかける</button>
+      <button id="stopButton" type="button">読み上げ停止</button>
     </div>
-  </div>
 
-  <button id="mic">🎤 話しかける</button>
-  <button id="stop" class="secondary">読み上げ停止</button>
-
-  <form id="form">
-    <input id="input" placeholder="文字でも話しかけられるよ">
-    <button type="submit">送信</button>
-    <script src="./main.js" defer></script>
-  </form>
-</div>
+    <form id="chatForm">
+      <input
+        id="userInput"
+        type="text"
+        placeholder="文字でも話しかけられる"
+        autocomplete="off"
+        aria-label="メッセージ"
+      >
+      <button type="submit">送信</button>
+    </form>
+  </main>
+</body>
+</html>
