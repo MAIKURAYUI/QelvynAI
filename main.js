@@ -1,206 +1,302 @@
 
 "use strict";
 
-const statusElement = document.getElementById("status");
-const messagesElement = document.getElementById("messages");
-const micButton = document.getElementById("micButton");
-const stopButton = document.getElementById("stopButton");
-const chatForm = document.getElementById("chatForm");
-const userInput = document.getElementById("userInput");
+// ========================================
+// QelvynAI - main.js
+// JSON会話・文字入力・音声入力・音声読み上げ
+// ========================================
 
+const elements = {
+  status: document.getElementById("status"),
+  messages: document.getElementById("messages"),
+  micButton: document.getElementById("micButton"),
+  stopButton: document.getElementById("stopButton"),
+  chatForm: document.getElementById("chatForm"),
+  userInput: document.getElementById("userInput")
+};
+
+const DATA_URL = "./greetings.json";
+
+let conversations = [];
 let recognition = null;
 let isListening = false;
 
-// 画面にメッセージを追加
-function addMessage(text, type) {
-  const el = document.createElement("div");
-  el.className = "message " + type;
-  el.textContent = (type === "user" ? "あなた：" : "AI：") + text;
-  messagesElement.appendChild(el);
+// 画面のステータスを更新
+function setStatus(message) {
+  if (elements.status) {
+    elements.status.textContent = message;
+  }
 }
 
-// 文字の表記を統一
+// 日本語の表記ゆれ・空白・句読点を整理
 function normalizeText(text) {
-  return String(text)
+  return String(text ?? "")
     .normalize("NFKC")
     .toLowerCase()
-    .replace(/[!！?？。、,.，．]/g, "")
-    .replace(/\s+/g, "")
-    .trim();
+    .replace(/[\s\u3000、。，．！？!?「」『』（）()【】［］〈〉《》…・,.]/g, "");
 }
 
 // 会話データを読み込む
 async function loadConversations() {
   try {
-    const response = await fetch("./greetings.json");
+    setStatus("会話データを読み込み中...");
+
+    const response = await fetch(DATA_URL, {
+      cache: "no-cache"
+    });
 
     if (!response.ok) {
-      throw new Error("HTTP " + response.status);
+      throw new Error(
+        `greetings.json の読み込みに失敗しました (${response.status})`
+      );
     }
 
     const data = await response.json();
 
-    if (!Array.isArray(data.conversations)) {
-      throw new Error("conversations 配列がありません");
+    if (!data || !Array.isArray(data.conversations)) {
+      throw new Error("JSONに conversations 配列がありません。");
     }
 
-    return data.conversations;
+    conversations = data.conversations.filter(item =>
+      item &&
+      Array.isArray(item.keywords) &&
+      Array.isArray(item.responses) &&
+      item.keywords.length > 0 &&
+      item.responses.length > 0
+    );
+
+    if (conversations.length === 0) {
+      throw new Error("有効な会話データがありません。");
+    }
+
+    setStatus(`準備完了（${conversations.length}件の会話データ）`);
+    return true;
   } catch (error) {
-    console.error("JSON読み込みエラー:", error);
-    statusElement.textContent =
-      "会話データを読み込めません。greetings.jsonを確認してください。";
-    return [];
+    console.error("会話データの読み込みエラー:", error);
+    setStatus("会話データを読み込めませんでした。JSONを確認してください。");
+    return false;
   }
 }
 
-let conversations = [];
+// 最も長く一致するキーワードを探す
+function findReply(userText) {
+  const query = normalizeText(userText);
 
-// 返事を探す
-function findReply(text) {
-  const query = normalizeText(text);
+  if (!query) {
+    return "何か話しかけてみてね！";
+  }
+
+  const matches = [];
 
   for (const conversation of conversations) {
-    const keywords = Array.isArray(conversation.keywords)
-      ? conversation.keywords
-      : [];
+    conversation.keywords.forEach((keyword, keywordIndex) => {
+      const normalizedKeyword = normalizeText(keyword);
 
-    if (keywords.some(keyword => {
-      const key = normalizeText(keyword);
-      return key && query.includes(key);
-    })) {
-      const responses = Array.isArray(conversation.responses)
-        ? conversation.responses
-        : [];
-
-      if (responses.length) {
-        return responses[Math.floor(Math.random() * responses.length)];
+      if (normalizedKeyword && query.includes(normalizedKeyword)) {
+        matches.push({
+          keyword: normalizedKeyword,
+          keywordIndex,
+          responses: conversation.responses
+        });
       }
-    }
+    });
   }
 
-  return "まだその言葉はわからないんだ。別の言い方で聞いてみてね。";
+  // 長いキーワードを優先。同じ長さならJSONの登録順
+  matches.sort((a, b) => b.keyword.length - a.keyword.length);
+
+  if (matches.length > 0) {
+    const match = matches[0];
+
+    // キーワードの順番と返事の順番を対応させる
+    const responseIndex =
+      match.keywordIndex % match.responses.length;
+
+    return String(match.responses[responseIndex]);
+  }
+
+  return "なるほどね！もう少し詳しく教えてくれる？";
 }
 
-// 音声読み上げ
+// 会話を画面に表示
+function addMessage(speaker, text) {
+  if (!elements.messages) return;
+
+  const message = document.createElement("p");
+  message.className =
+    speaker === "あなた" ? "message user-message" : "message ai-message";
+
+  const label = document.createElement("strong");
+  label.textContent = `${speaker}：`;
+
+  const content = document.createElement("span");
+  content.textContent = text;
+
+  message.append(label, content);
+  elements.messages.appendChild(message);
+
+  // 新しいメッセージまでスクロール
+  message.scrollIntoView({
+    behavior: "smooth",
+    block: "nearest"
+  });
+}
+
+// AIの返事を読み上げる
 function speak(text) {
   if (!("speechSynthesis" in window)) {
-    statusElement.textContent = "音声読み上げに対応していません";
+    setStatus("このブラウザは音声読み上げに対応していません。");
     return;
   }
 
-  speechSynthesis.cancel();
+  window.speechSynthesis.cancel();
 
   const utterance = new SpeechSynthesisUtterance(text);
   utterance.lang = "ja-JP";
+  utterance.rate = 1.0;
+  utterance.pitch = 1.0;
 
-  utterance.onstart = () => {
-    statusElement.textContent = "返答を読み上げ中";
+  utterance.onstart = () => setStatus("QelvynAIが話しています...");
+  utterance.onend = () => setStatus("準備完了");
+  utterance.onerror = event => {
+    console.warn("音声読み上げエラー:", event.error);
+    setStatus("音声読み上げを利用できませんでした。");
   };
 
-  utterance.onend = () => {
-    statusElement.textContent = "準備完了";
-  };
-
-  utterance.onerror = () => {
-    statusElement.textContent = "読み上げに失敗しました";
-  };
-
-  speechSynthesis.speak(utterance);
+  window.speechSynthesis.speak(utterance);
 }
 
-// メッセージ送信
-function sendMessage(text) {
-  const message = text.trim();
+// ユーザーの入力を処理
+function handleUserMessage(text) {
+  const message = String(text ?? "").trim();
 
   if (!message) return;
 
-  if (conversations.length === 0) {
-    statusElement.textContent =
-      "会話データがありません。greetings.jsonを確認してください。";
+  addMessage("あなた", message);
+
+  const reply = findReply(message);
+  addMessage("QelvynAI", reply);
+  speak(reply);
+}
+
+// 音声認識を準備
+function setupSpeechRecognition() {
+  const SpeechRecognition =
+    window.SpeechRecognition ||
+    window.webkitSpeechRecognition;
+
+  if (!SpeechRecognition) {
+    if (elements.micButton) {
+      elements.micButton.disabled = true;
+      elements.micButton.textContent = "🎤 音声入力非対応";
+    }
     return;
   }
 
-  addMessage(message, "user");
-
-  const answer = findReply(message);
-  addMessage(answer, "bot");
-  speak(answer);
-}
-
-// 文字入力
-chatForm.addEventListener("submit", event => {
-  event.preventDefault();
-
-  sendMessage(userInput.value);
-  userInput.value = "";
-});
-
-// 読み上げ停止
-stopButton.addEventListener("click", () => {
-  if ("speechSynthesis" in window) {
-    speechSynthesis.cancel();
-  }
-
-  statusElement.textContent = "読み上げを停止しました";
-});
-
-// 音声認識
-const SpeechRecognition =
-  window.SpeechRecognition || window.webkitSpeechRecognition;
-
-if (SpeechRecognition) {
   recognition = new SpeechRecognition();
   recognition.lang = "ja-JP";
   recognition.continuous = false;
   recognition.interimResults = false;
+  recognition.maxAlternatives = 1;
 
-  micButton.addEventListener("click", () => {
+  recognition.onstart = () => {
+    isListening = true;
+    if (elements.micButton) {
+      elements.micButton.textContent = "🎤 聞き取り中...";
+    }
+    setStatus("話しかけてください...");
+  };
+
+  recognition.onresult = event => {
+    const transcript = event.results?.[0]?.[0]?.transcript;
+
+    if (transcript) {
+      handleUserMessage(transcript);
+    }
+  };
+
+  recognition.onerror = event => {
+    console.warn("音声認識エラー:", event.error);
+
+    if (event.error === "not-allowed") {
+      setStatus("マイクの使用を許可してください。");
+    } else if (event.error === "no-speech") {
+      setStatus("声を聞き取れませんでした。もう一度試してください。");
+    } else {
+      setStatus(`音声認識エラー: ${event.error}`);
+    }
+  };
+
+  recognition.onend = () => {
+    isListening = false;
+
+    if (elements.micButton) {
+      elements.micButton.textContent = "🎤 話しかける";
+    }
+
+    if (!window.speechSynthesis?.speaking) {
+      setStatus("準備完了");
+    }
+  };
+}
+
+// ボタン・フォームのイベントを登録
+function setupEvents() {
+  elements.chatForm?.addEventListener("submit", event => {
+    event.preventDefault();
+
+    const text = elements.userInput?.value ?? "";
+    handleUserMessage(text);
+
+    if (elements.userInput) {
+      elements.userInput.value = "";
+      elements.userInput.focus();
+    }
+  });
+
+  elements.micButton?.addEventListener("click", () => {
+    if (!recognition) {
+      setStatus("このブラウザは音声認識に対応していません。");
+      return;
+    }
+
     if (isListening) {
       recognition.stop();
       return;
     }
 
     try {
+      window.speechSynthesis?.cancel();
       recognition.start();
     } catch (error) {
-      console.error("マイク起動エラー:", error);
-      statusElement.textContent =
-        "マイクを起動できません。少し待って再試行してください。";
+      console.warn("音声認識を開始できません:", error);
+      setStatus("音声入力を開始できませんでした。少し待って再試行してください。");
     }
   });
 
-  recognition.onstart = () => {
-    isListening = true;
-    micButton.textContent = "🎤 聞き取り中...";
-    statusElement.textContent = "話しかけてね！";
-  };
+  elements.stopButton?.addEventListener("click", () => {
+    window.speechSynthesis?.cancel();
 
-  recognition.onresult = event => {
-    const text = event.results[0][0].transcript;
-    sendMessage(text);
-  };
+    if (isListening && recognition) {
+      recognition.stop();
+    }
 
-  recognition.onerror = event => {
-    statusElement.textContent = "音声認識エラー: " + event.error;
-  };
-
-  recognition.onend = () => {
-    isListening = false;
-    micButton.textContent = "🎤 話しかける";
-  };
-} else {
-  micButton.disabled = true;
-  statusElement.textContent =
-    "音声認識に非対応です。文字入力を利用してください。";
+    setStatus("読み上げを停止しました。");
+  });
 }
 
 // 起動
 async function init() {
-  statusElement.textContent = "会話データを読み込み中...";
-  conversations = await loadConversations();
+  setupEvents();
+  setupSpeechRecognition();
 
-  if (conversations.length > 0) {
-    statusElement.textContent = "準備完了";
+  const loaded = await loadConversations();
+
+  if (loaded) {
+    addMessage(
+      "QelvynAI",
+      "こんにちは！私はQelvynAIだよ。気軽に話しかけてね！"
+    );
   }
 }
 
